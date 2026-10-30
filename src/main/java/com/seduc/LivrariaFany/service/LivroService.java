@@ -30,5 +30,6 @@ public class LivroService {
         livro.setNome(animation.getNome());
         livro.setNumeroPaginas(animation.getNumeroPaginas());
         livro.setPreco(animation.getPreco());
+        repository.save(livro);
     }
 }
