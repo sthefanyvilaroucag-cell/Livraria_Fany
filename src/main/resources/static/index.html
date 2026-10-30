@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Livraria Fany - Cadastro de Livros</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    /* CORES DO SITE: para mudar o rosa, troque os códigos abaixo */
+    tailwind.config = { theme: { extend: { colors: {
+      liv: { rosa: '#d6336c', hover: '#e64980', bg: '#fff5f9', card: '#ffffff', soft: '#ffe3ee',
+        border: '#f5c2d7', subtext: '#9c4a6c', text: '#4a1230' }
+    }}}};
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { font-family:'Plus Jakarta Sans',sans-serif;background:#fff5f9;color:#4a1230; }
+    .hero { background:linear-gradient(180deg,#ffd0e3 0%,#fff5f9 100%); }
+    .modal { background:rgba(255,255,255,.98);backdrop-filter:blur(20px);border:1px solid #f5c2d7; }
+  </style>
+</head>
+<body class="bg-liv-bg text-liv-text min-h-screen">
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useMemo}=React;
+
+/* ÍCONES (desenhos pequenos usados nos botões) */
+const Icons={
+  Book:({size=24})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+  Home:({size=20})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg>,
+  Plus:({size=18})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>,
+  Search:({size=18})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>,
+  Edit:({size=16})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 5 4 4M4 20l4-.8L20 7a2.8 2.8 0 0 0-4-4L4 15z"/></svg>,
+  Trash:({size=16})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg>
+};
+
+/* Livro vazio: usado quando abrimos o formulário para cadastrar um novo */
+const EMPTY={nome:'',autor:'',codigo:'',numeroPaginas:'',genero:'ROMANCE',editora:'',preco:''};
+
+const dinheiro=(v)=>v!=null&&v!==''?Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}):'Não informado';
+
+function App(){
+  /* ESTADOS: são as "memórias" da tela (qual tela está aberta, a lista de livros, etc.) */
+  const [tela,setTela]=useState('principal');
+  const [apiUrl,setApiUrl]=useState('http://localhost:8080/api/livros');
+  const [urlEdit,setUrlEdit]=useState(apiUrl);
+  const [showConfig,setShowConfig]=useState(false);
+  const [statusApi,setStatusApi]=useState('carregando');
+  const [erroDetalhe,setErroDetalhe]=useState('');
+  const [livros,setLivros]=useState([]);
+  const [busca,setBusca]=useState('');
+  const [filtro,setFiltro]=useState('TODOS');
+  const [form,setForm]=useState(EMPTY);
+  const [editando,setEditando]=useState(null);
+  const [deletando,setDeletando]=useState(null);
+  const [toast,setToast]=useState(null);
+  const [carregando,setCarregando]=useState(false);
+
+  /* Mostra uma mensagem rápida no canto da tela */
+  const avisar=(mensagem,tipo='info')=>{setToast({mensagem,tipo});setTimeout(()=>setToast(null),3800)};
+
+  /* Fala com a API (o backend) */
+  const request=async(path='',options={})=>{
+    const res=await fetch(`${apiUrl.replace(/\/$/,'')}${path}`,options);
+    if(!res.ok) throw new Error(`A API respondeu com status ${res.status}`);
+    if(res.status===204)return null;
+    const text=await res.text(); return text?JSON.parse(text):null;
+  };
+
+  /* Busca a lista de livros na API */
+  const carregarLivros=async()=>{
+    setCarregando(true);setErroDetalhe('');
+    try{
+      const dados=await request();
+      setLivros(Array.isArray(dados)?dados:(dados?[dados]:[]));
+      setStatusApi('conectado');
+    }catch(e){setStatusApi('erro');setErroDetalhe(e.message||'Não foi possível conectar à API.');}
+    finally{setCarregando(false);}
+  };
+  useEffect(()=>{carregarLivros()},[apiUrl]);
+
+  /* Salva: POST se for livro novo, PUT se estiver editando */
+  const salvar=async(e)=>{
+    e.preventDefault();
+    const dados={...form,preco:form.preco===''?null:Number(form.preco)};
+    try{
+      if(editando!==null){
+        await request('/'+editando,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(dados)});
+        avisar('Livro atualizado com sucesso!','sucesso');
+      }else{
+        await request('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dados)});
+        avisar('Livro cadastrado com sucesso!','sucesso');
+      }
+      setForm(EMPTY);setEditando(null);setTela('principal');await carregarLivros();
+    }catch(err){avisar(`Não foi possível salvar. ${err.message}`,'erro');}
+  };
+
+  /* Abre o formulário preenchido com os dados do livro */
+  const editar=(l)=>{
+    setForm({nome:l.nome||'',autor:l.autor||'',codigo:l.codigo||'',numeroPaginas:l.numeroPaginas||'',genero:l.genero||'ROMANCE',editora:l.editora||'',preco:l.preco??''});
+    setEditando(l.id);setTela('cadastro');
+  };
+
+  /* Exclui o livro (DELETE) */
+  const excluir=async(id)=>{
+    try{await request('/'+id,{method:'DELETE'});avisar('Livro excluído com sucesso!','sucesso');setDeletando(null);await carregarLivros();}
+    catch(err){avisar(`Não foi possível excluir. ${err.message}`,'erro');}
+  };
+
+  /* Aplica a busca e o filtro de gênero */
+  const filtrados=useMemo(()=>livros.filter(l=>{
+    const texto=[l.nome,l.autor,l.codigo,l.genero,l.editora].filter(Boolean).join(' ').toLowerCase();
+    return texto.includes(busca.toLowerCase())&&(filtro==='TODOS'||l.genero===filtro);
+  }),[livros,busca,filtro]);
+
+  const generosUsados=new Set(livros.map(l=>l.genero).filter(Boolean)).size;
+  const precoMedio=livros.length?livros.reduce((soma,l)=>soma+(Number(l.preco)||0),0)/livros.length:0;
+
+  /* Estilos repetidos nos campos do formulário */
+  const field='w-full bg-white border border-liv-border rounded-lg p-3 text-sm text-liv-text focus:outline-none focus:border-liv-rosa transition';
+  const label='block text-liv-subtext font-bold mb-1.5 uppercase tracking-wider text-[10px]';
+  const novoLivro=()=>{setForm(EMPTY);setEditando(null);setTela('cadastro')};
+  const generos=[['ROMANCE','Romance'],['FICCAO','Ficção'],['FANTASIA','Fantasia'],['INFANTIL','Infantil'],['DIDATICO','Didático'],['OUTRO','Outro']];
+
+  return <div className="flex min-h-screen bg-liv-bg text-liv-text">
+    {toast&&<div className={`fixed top-5 right-5 z-[70] px-4 py-3 rounded-xl text-xs font-semibold shadow-xl border bg-white ${toast.tipo==='sucesso'?'text-liv-rosa border-liv-rosa/40':toast.tipo==='erro'?'text-red-600 border-red-300':'text-liv-text border-liv-border'}`}>{toast.mensagem}</div>}
+
+    {/* MENU LATERAL */}
+    <aside className="w-64 bg-white p-5 hidden md:flex flex-col justify-between border-r border-liv-border">
+      <div className="space-y-8">
+        <div className="flex items-center gap-3 px-2"><span className="text-liv-rosa"><Icons.Book size={30}/></span><span className="text-xl font-extrabold">Livraria <span className="text-liv-rosa">Fany</span></span></div>
+        <nav className="space-y-2">
+          <button onClick={()=>setTela('principal')} className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-bold ${tela==='principal'?'bg-liv-soft text-liv-rosa':'text-liv-subtext hover:text-liv-text'}`}><Icons.Home/> Livros cadastrados</button>
+          <button onClick={novoLivro} className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-bold ${tela==='cadastro'?'bg-liv-soft text-liv-rosa':'text-liv-subtext hover:text-liv-text'}`}><Icons.Plus/> Cadastrar livro</button>
+        </nav>
+      </div>
+      <div className="bg-liv-bg p-3 rounded-xl border border-liv-border">
+        <span className="text-liv-subtext block text-[10px] uppercase font-bold mb-1">API Backend</span>
+        <div className="text-[11px] font-mono break-all mb-3">{apiUrl}</div>
+        <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-2 text-xs"><span className={`w-2 h-2 rounded-full ${statusApi==='conectado'?'bg-emerald-500':statusApi==='carregando'?'bg-amber-400':'bg-red-500'}`}></span>{statusApi==='conectado'?'Conectada':statusApi==='carregando'?'Conectando':'Erro de conexão'}</span><button onClick={()=>{setUrlEdit(apiUrl);setShowConfig(true)}} className="text-xs text-liv-rosa hover:underline">Alterar</button></div>
+      </div>
+    </aside>
+
+    <main className="flex-1 min-w-0">
+      {/* TOPO */}
+      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-liv-border px-5 md:px-8 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 md:hidden"><span className="text-liv-rosa"><Icons.Book size={26}/></span><b className="text-lg">Livraria <span className="text-liv-rosa">Fany</span></b></div>
+        <div className="hidden md:block text-xs text-liv-subtext">LIVRARIA FANY / <span className="text-liv-text">{tela==='cadastro'?'CADASTRO':'PAINEL'}</span></div>
+        <div className="flex gap-2">
+          <button onClick={()=>carregarLivros()} className="px-3 py-2 rounded-full border border-liv-border text-xs font-bold hover:bg-liv-soft">{carregando?'Atualizando...':'↻ Atualizar'}</button>
+          <button onClick={novoLivro} className="flex items-center gap-2 px-4 py-2 rounded-full bg-liv-rosa text-white text-xs font-extrabold hover:bg-liv-hover"><Icons.Plus/> Novo livro</button>
+        </div>
+      </header>
+
+      <div className="p-5 md:p-8 max-w-7xl mx-auto">
+        {tela==='principal'?<>
+          {/* DESTAQUE */}
+          <section className="hero rounded-2xl p-7 md:p-10 mb-7 border border-liv-border">
+            <p className="text-liv-rosa text-xs uppercase tracking-[.25em] font-extrabold mb-3">Bem-vinda à Livraria Fany</p>
+            <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight mb-3">Cada livro tem uma <span className="text-liv-rosa">história.</span></h1>
+            <p className="text-liv-subtext max-w-xl text-sm leading-6">Gerencie o acervo da livraria em um só lugar. Os dados são carregados e salvos diretamente na sua API.</p>
+          </section>
+
+          {statusApi==='erro'&&<div className="mb-5 rounded-xl border border-red-300 bg-red-50 p-4 text-sm"><b className="text-red-600">Não foi possível conectar à API.</b><p className="text-liv-subtext mt-1">{erroDetalhe}</p><p className="text-liv-subtext mt-1">Confira a URL, se o backend está em execução e se o CORS está configurado.</p><button onClick={()=>{setUrlEdit(apiUrl);setShowConfig(true)}} className="mt-3 text-liv-rosa font-bold hover:underline">Configurar endpoint</button></div>}
+
+          {/* NÚMEROS */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-7">
+            <div className="bg-liv-card border border-liv-border rounded-xl p-5"><p className="text-liv-subtext text-xs font-bold uppercase">Livros cadastrados</p><p className="text-3xl font-extrabold mt-2">{livros.length}</p></div>
+            <div className="bg-liv-card border border-liv-border rounded-xl p-5"><p className="text-liv-subtext text-xs font-bold uppercase">Gêneros diferentes</p><p className="text-3xl font-extrabold mt-2">{generosUsados}</p></div>
+            <div className="bg-liv-card border border-liv-border rounded-xl p-5"><p className="text-liv-subtext text-xs font-bold uppercase">Preço médio</p><p className="text-3xl font-extrabold mt-2">{dinheiro(precoMedio)}</p></div>
+          </div>
+
+          {/* BUSCA E FILTRO */}
+          <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-5">
+            <div><h2 className="text-xl font-extrabold">Livros cadastrados</h2><p className="text-liv-subtext text-xs mt-1">Registros retornados pela API REST</p></div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex items-center gap-2 bg-white border border-liv-border rounded-full px-4 text-liv-subtext"><Icons.Search/><input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar título, autor..." className="bg-transparent py-2.5 text-sm text-liv-text outline-none w-full sm:w-48"/></div>
+              <select value={filtro} onChange={e=>setFiltro(e.target.value)} className="bg-white border border-liv-border rounded-full px-4 py-2.5 text-sm outline-none"><option value="TODOS">Todos os gêneros</option>{generos.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+            </div>
+          </div>
+
+          {/* LISTA DE LIVROS */}
+          {carregando&&livros.length===0?<div className="text-center py-16 text-liv-subtext">Carregando livros da API...</div>:filtrados.length===0?<div className="bg-liv-card border border-liv-border rounded-2xl p-12 text-center"><div className="text-liv-rosa flex justify-center mb-4"><Icons.Book size={42}/></div><h3 className="font-extrabold text-lg">{statusApi==='erro'?'Não foi possível carregar os livros':'Nenhum livro encontrado'}</h3><p className="text-liv-subtext text-sm mt-2">{statusApi==='erro'?'Verifique a conexão com o backend.':'Cadastre o primeiro livro ou altere os filtros da busca.'}</p><button onClick={novoLivro} className="mt-5 inline-flex items-center gap-2 rounded-full bg-liv-rosa text-white px-5 py-3 font-extrabold text-sm"><Icons.Plus/> Cadastrar livro</button></div>:
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">{filtrados.map((l,i)=><article key={l.id??i} className="bg-liv-card border border-liv-border rounded-2xl p-5 hover:bg-liv-soft/50 transition">
+            <div className="flex justify-between items-start gap-3"><div className="flex gap-3 min-w-0"><div className="w-12 h-12 shrink-0 rounded-xl bg-liv-soft text-liv-rosa flex items-center justify-center"><Icons.Book size={25}/></div><div className="min-w-0"><h3 className="font-extrabold text-lg truncate">{l.nome||'Sem nome'}</h3><p className="text-liv-subtext text-xs mt-1">{l.autor||'Autor não informado'} {l.genero?'· '+l.genero:''}</p></div></div><span className="text-[10px] font-bold bg-liv-soft text-liv-rosa px-2 py-1 rounded-full">#{l.id??'—'}</span></div>
+            <div className="grid grid-cols-2 gap-3 mt-5 text-xs"><div className="bg-liv-bg rounded-lg p-3"><p className="text-liv-subtext mb-1">Código</p><b>{l.codigo||'Não informado'}</b></div><div className="bg-liv-bg rounded-lg p-3"><p className="text-liv-subtext mb-1">Páginas</p><b>{l.numeroPaginas||'Não informado'}</b></div><div className="bg-liv-bg rounded-lg p-3"><p className="text-liv-subtext mb-1">Editora</p><b>{l.editora||'Não informada'}</b></div><div className="bg-liv-bg rounded-lg p-3"><p className="text-liv-subtext mb-1">Preço</p><b>{dinheiro(l.preco)}</b></div></div>
+            <div className="flex gap-2 mt-5 pt-4 border-t border-liv-border"><button onClick={()=>editar(l)} className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-liv-border py-2.5 text-xs font-bold hover:bg-liv-soft"><Icons.Edit/> Editar</button><button onClick={()=>setDeletando(l.id)} className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-red-200 text-red-600 py-2.5 text-xs font-bold hover:bg-red-50"><Icons.Trash/> Excluir</button></div>
+          </article>)}</div>}
+          <p className="text-[10px] text-liv-subtext mt-6">Endpoint configurado: <code>{apiUrl}</code> · GET, POST, PUT e DELETE</p>
+        </>:
+
+        /* TELA DE CADASTRO */
+        <section className="max-w-3xl mx-auto">
+          <button onClick={()=>{setTela('principal');setEditando(null);setForm(EMPTY)}} className="text-liv-subtext hover:text-liv-text text-sm mb-5">← Voltar para os livros</button>
+          <div className="bg-liv-card border border-liv-border rounded-2xl overflow-hidden">
+            <div className="hero p-6 md:p-8 border-b border-liv-border"><p className="text-liv-rosa text-xs font-extrabold uppercase tracking-[.2em] mb-2">Ficha do livro</p><h1 className="text-2xl md:text-3xl font-extrabold">{editando!==null?'Editar livro':'Cadastrar novo livro'}</h1><p className="text-liv-subtext text-sm mt-2">Preencha as informações e salve diretamente na API.</p></div>
+            <form onSubmit={salvar} className="p-6 md:p-8 space-y-5">
+              <div><label className={label}>Nome do livro *</label><input required value={form.nome} onChange={e=>setForm({...form,nome:e.target.value})} placeholder="Ex.: Dom Casmurro" className={field}/></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label className={label}>Autor *</label><input required value={form.autor} onChange={e=>setForm({...form,autor:e.target.value})} placeholder="Ex.: Machado de Assis" className={field}/></div><div><label className={label}>Gênero *</label><select required value={form.genero} onChange={e=>setForm({...form,genero:e.target.value})} className={field}>{generos.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label className={label}>Código</label><input value={form.codigo} onChange={e=>setForm({...form,codigo:e.target.value})} placeholder="Ex.: LIV-001" className={field}/></div><div><label className={label}>Número de páginas</label><input value={form.numeroPaginas} onChange={e=>setForm({...form,numeroPaginas:e.target.value})} placeholder="Ex.: 256" className={field}/></div></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label className={label}>Editora</label><input value={form.editora} onChange={e=>setForm({...form,editora:e.target.value})} placeholder="Ex.: Companhia das Letras" className={field}/></div><div><label className={label}>Preço (R$)</label><input type="number" min="0" step="0.01" value={form.preco} onChange={e=>setForm({...form,preco:e.target.value})} placeholder="Ex.: 29.90" className={field}/></div></div>
+              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2"><button type="button" onClick={()=>{setTela('principal');setEditando(null);setForm(EMPTY)}} className="flex-1 py-3 rounded-full border border-liv-border font-bold text-sm hover:bg-liv-soft">Cancelar</button><button type="submit" className="flex-1 py-3 rounded-full bg-liv-rosa hover:bg-liv-hover text-white font-extrabold text-sm">{editando!==null?'Salvar alterações (PUT)':'Cadastrar livro (POST)'}</button></div>
+            </form>
+          </div>
+        </section>}
+      </div>
+    </main>
+
+    {/* JANELA: configurar o endereço da API */}
+    {showConfig&&<div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="modal max-w-lg w-full p-6 rounded-2xl space-y-5"><div className="flex justify-between items-center"><h3 className="font-extrabold">Configurar URL do Backend</h3><button onClick={()=>setShowConfig(false)} className="text-liv-subtext text-xl">×</button></div><p className="text-liv-subtext text-sm">Informe a rota base da API de livros. O front-end fará chamadas GET, POST, PUT e DELETE usando esse endpoint.</p><div><label className={label}>URL base da API</label><input value={urlEdit} onChange={e=>setUrlEdit(e.target.value)} placeholder="http://localhost:8080/api/livros" className={field}/></div><div className="flex gap-3"><button onClick={()=>setShowConfig(false)} className="flex-1 py-3 rounded-full border border-liv-border font-bold text-sm">Cancelar</button><button onClick={()=>{if(urlEdit.trim()){setApiUrl(urlEdit.trim().replace(/\/$/,''));setShowConfig(false)}}} className="flex-1 py-3 rounded-full bg-liv-rosa text-white font-extrabold text-sm">Salvar e testar conexão</button></div></div></div>}
+
+    {/* JANELA: confirmar exclusão */}
+    {deletando!==null&&<div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="modal max-w-sm w-full p-6 rounded-2xl text-center space-y-5"><div className="mx-auto w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center"><Icons.Trash size={22}/></div><h3 className="font-extrabold text-lg">Excluir este livro?</h3><p className="text-liv-subtext text-sm">A exclusão enviará <code className="text-red-600">DELETE {apiUrl}/{deletando}</code> para sua API.</p><div className="flex gap-3"><button onClick={()=>setDeletando(null)} className="flex-1 py-3 rounded-full bg-liv-soft font-bold text-sm">Cancelar</button><button onClick={()=>excluir(deletando)} className="flex-1 py-3 rounded-full bg-red-600 text-white font-extrabold text-sm">Excluir</button></div></div></div>}
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
